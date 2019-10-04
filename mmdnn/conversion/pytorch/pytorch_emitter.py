@@ -95,7 +95,7 @@ class KitModel(nn.Module):
         __weights_dict = load_weights(weight_file)
 """)
 
-        self.add_body(1, "def forward(self, x):")
+        self.add_body(1, "def forward(self, _x):")
 
         for layer in self.IR_graph.topological_sort:
             current_node = self.IR_graph.get_node(layer)
@@ -112,7 +112,7 @@ class KitModel(nn.Module):
                 self.emit_UNKNOWN(current_node)
 
         self.add_body(2, "return {}".format(
-            ', '.join([self.IR_graph.get_node(name).real_variable_name for name in self.IR_graph.output_layers if self.IR_graph.get_node(name).type != 'Pack'])))
+            ', '.join(['_' + self.IR_graph.get_node(name).real_variable_name for name in self.IR_graph.output_layers if self.IR_graph.get_node(name).type != 'Pack'])))
 
         self.add_body(0, "")
         for i in self.used_layers:
@@ -136,7 +136,7 @@ class KitModel(nn.Module):
 
         padding = self._convert_padding(IR_node)
         input_node = IR_node.variable_name + '_pad'
-        self.add_body(2, "{:<15} = F.pad({}, {}{})".format(
+        self.add_body(2, "_{:<15} = F.pad(_{}, {}{})".format(
             input_node,
             self.parent_variable_name(IR_node),
             padding,
@@ -163,7 +163,7 @@ class KitModel(nn.Module):
         else:
             group = IR_node.get_attr('group', 1)
 
-        self.add_init(2, "self.{} = self.__conv({}, name='{}', in_channels={}, out_channels={}, kernel_size={}, stride={}, groups={}, bias={})".format(
+        self.add_init(2, "self._{} = self.__conv({}, name='{}', in_channels={}, out_channels={}, kernel_size={}, stride={}, groups={}, bias={})".format(
             IR_node.variable_name,
             dim,
             IR_node.name,
@@ -177,7 +177,7 @@ class KitModel(nn.Module):
 
         input_node = self._defuse_padding(IR_node)
 
-        code = "{:<15} = self.{}({})".format(
+        code = "_{:<15} = self._{}(_{})".format(
             IR_node.variable_name,
             IR_node.variable_name,
             input_node)
@@ -213,7 +213,7 @@ class KitModel(nn.Module):
             raise ValueError()
 
         if IR_node.layer.attr['global_pooling'].b:
-            code = "{:<15} = F.{}(input = {}, kernel_size = {}.size()[2:])".format(
+            code = "_{:<15} = F.{}(input = _{}, kernel_size = {}.size()[2:])".format(
                 IR_node.variable_name,
                 pool_name,
                 self.parent_variable_name(IR_node),
@@ -231,7 +231,7 @@ class KitModel(nn.Module):
                 pool_size = IR_node.get_attr('kernel_shape')[1:-1]
                 strides = IR_node.get_attr('strides')[1:-1]
 
-                code = "{:<15} = F.{}({}, kernel_size={}, stride={}, padding={}, ceil_mode={})".format(
+                code = "_{:<15} = F.{}(_{}, kernel_size={}, stride={}, padding={}, ceil_mode={})".format(
                     IR_node.variable_name,
                     pool_name,
                     input_node,
@@ -254,7 +254,7 @@ class KitModel(nn.Module):
                 ceil_mode = self.is_ceil_mode(IR_node.get_attr('pads'))
 
                 # input_node = self._defuse_padding(IR_node, exstr)
-                code = "{:<15} = F.{}({}, kernel_size={}, stride={}, padding={}, ceil_mode={}, count_include_pad=False)".format(
+                code = "_{:<15} = F.{}(_{}, kernel_size={}, stride={}, padding={}, ceil_mode={}, count_include_pad=False)".format(
                     IR_node.variable_name,
                     pool_name,
                     self.parent_variable_name(IR_node),
@@ -278,7 +278,7 @@ class KitModel(nn.Module):
 
 
     def emit_Dropout(self, IR_node):
-        code = "{:<15} = F.dropout(input = {}, p = {}, training = self.training, inplace = True)".format(
+        code = "_{:<15} = F.dropout(input = _{}, p = {}, training = self.training, inplace = True)".format(
             IR_node.variable_name,
             self.parent_variable_name(IR_node),
             IR_node.layer.attr["keep_prob"].f)
@@ -307,7 +307,7 @@ class KitModel(nn.Module):
         if IR_node.get_attr('in_features') != None:
             in_features = IR_node.get_attr('in_features')
 
-        self.add_init(2, "self.{} = self.__dense(name = '{}', in_features = {}, out_features = {}, bias = {})".format(
+        self.add_init(2, "self._{} = self.__dense(name = '{}', in_features = {}, out_features = {}, bias = {})".format(
             IR_node.variable_name,
             IR_node.name,
             in_features,
@@ -318,7 +318,7 @@ class KitModel(nn.Module):
         if len(self.IR_graph.get_parent(IR_node.name, [0]).get_attr('_output_shapes')[0].dim) > 2:
             input_node = "{}.view({}.size(0), -1)".format(input_node, input_node)
         
-        code = "{:<15} = self.{}({})".format(
+        code = "_{:<15} = self._{}(_{})".format(
             IR_node.variable_name,
             IR_node.variable_name,
             input_node)
@@ -331,7 +331,7 @@ class KitModel(nn.Module):
 
     def emit_Flatten(self, IR_node):
         parent = self.IR_graph.get_parent(IR_node.name, [0]).real_variable_name
-        code = "{:<15} = {}.view({}.size(0), -1)".format(
+        code = "_{:<15} = _{}.view(_{}.size(0), -1)".format(
             IR_node.variable_name,
             parent,
             parent)
@@ -341,7 +341,7 @@ class KitModel(nn.Module):
     def emit_Reshape(self, IR_node):
         shape_list = IR_node.get_attr('shape')
         shape_str = ','.join([str(int(i)) for i in shape_list])
-        code = "{:<15} = torch.reshape(input = {}, shape = ({}))".format(
+        code = "_{:<15} = torch.reshape(input = _{}, shape = ({}))".format(
             IR_node.variable_name,
             self.IR_graph.get_node(IR_node.in_edges[0]).real_variable_name,
             shape_str)
@@ -349,21 +349,21 @@ class KitModel(nn.Module):
 
 
     def emit_Tanh(self, IR_node):
-        code = "{:<15} = F.tanh({})".format(
+        code = "_{:<15} = F.tanh(_{})".format(
             IR_node.variable_name,
             self.parent_variable_name(IR_node, [0]))
         return code
 
 
     def emit_Relu(self, IR_node):
-        code = "{:<15} = F.relu({})".format(
+        code = "_{:<15} = F.relu(_{})".format(
             IR_node.variable_name,
             self.parent_variable_name(IR_node, [0]))
         return code
 
 
     def emit_LeakyRelu(self, IR_node):
-        code = "{:<15} = F.leaky_relu({}, negative_slope={})".format(
+        code = "_{:<15} = F.leaky_relu(_{}, negative_slope={})".format(
             IR_node.variable_name,
             self.parent_variable_name(IR_node, [0]),
             IR_node.get_attr('alpha'))
@@ -371,21 +371,21 @@ class KitModel(nn.Module):
 
 
     def emit_Relu6(self, IR_node):
-        code = "{:<15} = F.relu6({})".format(
+        code = "_{:<15} = F.relu6(_{})".format(
             IR_node.variable_name,
             self.parent_variable_name(IR_node, [0]))
         return code
 
 
     def emit_Softmax(self, IR_node):
-        code = "{:<15} = F.softmax({})".format(
+        code = "_{:<15} = F.softmax(_{})".format(
             IR_node.variable_name,
             self.parent_variable_name(IR_node, [0]))
         return code
 
 
     def emit_Sigmoid(self, IR_node):
-        code = "{:<15} = F.sigmoid({})".format(
+        code = "_{:<15} = F.sigmoid(_{})".format(
             IR_node.variable_name,
             self.parent_variable_name(IR_node)
         )
@@ -394,14 +394,14 @@ class KitModel(nn.Module):
 
     def emit_Embedding(self, IR_node):
         self.used_layers.add("Embedding")
-        self.add_init(2, "self.{} = self.__embedding('{}', num_embeddings={}, embedding_dim={})".format(
+        self.add_init(2, "self._{} = self.__embedding('{}', num_embeddings={}, embedding_dim={})".format(
             IR_node.variable_name,
             IR_node.name,
             IR_node.get_attr('input_dim'),   #2-D
             IR_node.get_attr('output_dim')
             ))
         
-        code = "{:<15} = self.{}({})".format(
+        code = "_{:<15} = self._{}(_{})".format(
             IR_node.variable_name,
             IR_node.variable_name,
             "torch.LongTensor(np.array({}))".format(self.parent_variable_name(IR_node))
@@ -419,7 +419,7 @@ class KitModel(nn.Module):
         else:
             dropout_str = ""
 
-        code = "{:<15} = {}(units = {}, use_bias = {} {})({})".format(
+        code = "_{:<15} = {}(units = {}, use_bias = {} {})(_{})".format(
                 IR_node.name,
                 func,
                 IR_node.IR_layer.attr['units'].i,
@@ -439,7 +439,7 @@ class KitModel(nn.Module):
 
 
     def emit_Add(self, IR_node):
-        code = "{:<15} = {} + {}".format(
+        code = "_{:<15} = _{} + _{}".format(
             IR_node.variable_name,
              self.parent_variable_name(IR_node),
              self.parent_variable_name(IR_node, [1]))
@@ -447,23 +447,23 @@ class KitModel(nn.Module):
 
 
     def emit_Sub(self, IR_node):
-        code = "{:<15} = {}".format(
+        code = "_{:<15} = _{}".format(
             IR_node.variable_name,
-            ' - '.join(self.parent_variable_name(IR_node, [idx]) for idx in range(len(IR_node.in_edges))))
+            ' - '.join('_' + self.parent_variable_name(IR_node, [idx]) for idx in range(len(IR_node.in_edges))))
         return code
 
 
     def emit_Mul(self, IR_node):
-        code = "{:<15} = {}".format(
+        code = "_{:<15} = _{}".format(
             IR_node.variable_name,
-            ' * '.join(self.parent_variable_name(IR_node, [idx]) for idx in range(len(IR_node.in_edges))))
+            ' * '.join('_' + self.parent_variable_name(IR_node, [idx]) for idx in range(len(IR_node.in_edges))))
         return code
 
 
     def emit_MatMul(self, IR_node):
-        code = "{:<15} = torch.matmul({})".format(
+        code = "_{:<15} = torch.matmul(_{})".format(
             IR_node.variable_name,
-            ' , '.join('%s' % self.IR_graph.get_node(s).real_variable_name for s in IR_node.in_edges))
+            ' , '.join('_%s' % self.IR_graph.get_node(s).real_variable_name for s in IR_node.in_edges))
         return code
 
 
@@ -472,11 +472,11 @@ class KitModel(nn.Module):
             value = IR_node.get_attr('value')
             if not isinstance(value, list):
                 value = [value]
-            code = "self.{:<15} = torch.autograd.Variable(torch.Tensor({}), requires_grad=False)".format(
+            code = "self._{:<15} = torch.autograd.Variable(torch.Tensor(_{}), requires_grad=False)".format(
                 IR_node.variable_name,
                 value)
         else:
-            code = "self.{:<15} = torch.autograd.Variable(torch.from_numpy(__weights_dict['{}']['value']), requires_grad=False)".format(
+            code = "self._{:<15} = torch.autograd.Variable(torch.from_numpy(__weights_dict['_{}']['value']), requires_grad=False)".format(
                 IR_node.variable_name,
                 IR_node.name)
         
@@ -499,9 +499,9 @@ class KitModel(nn.Module):
 
     def emit_Concat(self, IR_node):
         axis = self._convert_axis(IR_node, IR_node.get_attr('axis'))
-        code = "{:<15} = torch.cat(({}), {})".format(
+        code = "_{:<15} = torch.cat(({}), {})".format(
             IR_node.variable_name,
-            ', '.join(self.parent_variable_name(IR_node, [idx]) for idx in range(len(IR_node.in_edges))),
+            ', '.join('_'+self.parent_variable_name(IR_node, [idx]) for idx in range(len(IR_node.in_edges))),
             axis,
         )
         return code
@@ -517,16 +517,19 @@ class KitModel(nn.Module):
         else:
             num_features = output_shape.dim[-1].size
 
-        self.add_init(2, "self.{} = self.__batch_normalization({}, '{}', num_features={}, eps={}, momentum={})".format(
+        # fix so that we don't end up with untrainable batch norm layers
+        momentum = IR_node.layer.attr['momentum'].f
+        momentum = 0.01 if momentum < 1e-10 else momentum
+        self.add_init(2, "self._{} = self.__batch_normalization({}, '{}', num_features={}, eps={}, momentum={})".format(
              IR_node.variable_name,
              dim,
              IR_node.name,
              num_features,
              IR_node.layer.attr['epsilon'].f,
-             IR_node.layer.attr['momentum'].f,
+             momentum,
         ))
 
-        code = "{:<15} = self.{}({})".format(
+        code = "_{:<15} = self._{}(_{})".format(
             IR_node.variable_name,
             IR_node.variable_name,
             self.parent_variable_name(IR_node)
@@ -538,14 +541,14 @@ class KitModel(nn.Module):
         self.used_layers.add(IR_node.type)
         dim = len(IR_node.layer.attr['_output_shapes'].list.shape[0].dim) - 2
 
-        self.add_init(2, "self.{} = self.__scale({}, '{}', num_features={})".format(
+        self.add_init(2, "self._{} = self.__scale({}, '{}', num_features={})".format(
              IR_node.variable_name,
              dim,
              IR_node.name,
              IR_node.layer.attr['_output_shapes'].list.shape[0].dim[-1].size
         ))
 
-        code = "{:<15} = self.{}({})".format(
+        code = "_{:<15} = self._{}(_{})".format(
             IR_node.variable_name,
             IR_node.variable_name,
             self.parent_variable_name(IR_node)
@@ -554,7 +557,7 @@ class KitModel(nn.Module):
 
 
     def emit_Squeeze(self, IR_node):
-        code = "{:<15} = torch.squeeze({})".format(
+        code = "_{:<15} = torch.squeeze(_{})".format(
             IR_node.variable_name, self.parent_variable_name(IR_node)
         )
         return code
@@ -581,7 +584,7 @@ class KitModel(nn.Module):
             assert False
 
         padding = self._convert_padding(IR_node)
-        code = "{:<15} = F.pad({}, {}, {})".format(
+        code = "_{:<15} = F.pad(_{}, {}, {})".format(
             IR_node.variable_name,
             self.parent_variable_name(IR_node),
             padding,
@@ -594,7 +597,7 @@ class KitModel(nn.Module):
         input_node = self.parent_variable_name(IR_node)
         codes = []
         for axis in sorted(axes, reverse=True):
-            code = "{:<15} = torch.mean({}, {}, {})".format(
+            code = "_{:<15} = torch.mean(_{}, {}, {})".format(
                 IR_node.variable_name,
                 input_node,
                 axis,
@@ -606,7 +609,7 @@ class KitModel(nn.Module):
 
 
     def emit_LRN(self, IR_node):
-        code =  "{:<15} = F.local_response_norm({}, size={}, alpha={}, beta={}, k={})".format(
+        code =  "_{:<15} = F.local_response_norm(_{}, size={}, alpha={}, beta={}, k={})".format(
             IR_node.variable_name,
             self.parent_variable_name(IR_node),
             IR_node.get_attr('size') * 2 - 1,
@@ -625,19 +628,19 @@ class KitModel(nn.Module):
         if 'dtype' in IR_node.layer.attr:
             dtype_str = "dtype={}".format(self.dtype_map[IR_node.layer.attr['dtype'].type])
             if 'int' in dtype_str:
-                code = "{:<15} = torch.tensor({}, {})".format(
+                code = "_{:<15} = torch.tensor({}, {})".format(
                     IR_node.variable_name,
                     IR_node.layer.attr['value'].i,
                     dtype_str)
             else:
-                code = "{:<15} = torch.tensor({}, {})".format(
+                code = "_{:<15} = torch.tensor({}, {})".format(
                     IR_node.variable_name,
                     IR_node.layer.attr['value'].f,
                     dtype_str)
 
         else:
             dtype_str = "dtype=torch.float32"
-            code = "{:<15} = torch.tensor({}, {})".format(
+            code = "_{:<15} = torch.tensor({}, {})".format(
                 IR_node.variable_name,
                 IR_node.layer.attr['value'].f,
                 dtype_str)
@@ -645,7 +648,7 @@ class KitModel(nn.Module):
 
 
     def emit_Shape(self, IR_node):
-        code = "{:<15} = torch.Tensor(list({}.size()))".format(
+        code = "_{:<15} = torch.Tensor(list(_{}.size()))".format(
             IR_node.variable_name,
             self.parent_variable_name(IR_node)
             )
@@ -653,9 +656,9 @@ class KitModel(nn.Module):
 
 
     def emit_Pack(self, IR_node):
-        code = "{:<15} = {}".format(
+        code = "_{:<15} = {}".format(
             IR_node.variable_name,
-            '[' +  ','.join('%s' % self.IR_graph.get_node(s).real_variable_name for s in IR_node.in_edges) + ']',
+            '[' +  ','.join('_%s' % self.IR_graph.get_node(s).real_variable_name for s in IR_node.in_edges) + ']',
             )
         return code
 
@@ -682,7 +685,7 @@ class KitModel(nn.Module):
             shrink_str = '[' + ','.join(':' if bit==0 else '0' for bit in mask) + ']'
         else:
             shrink_str = ''
-        code = "{:<15} = {}[{}]{}".format(
+        code = "_{:<15} = _{}[{}]{}".format(
             IR_node.variable_name,
             self.parent_variable_name(IR_node),
             extra_str,
@@ -701,7 +704,7 @@ class KitModel(nn.Module):
                 self.parent_variable_name(IR_node), 
                 IR_node.get_attr('axis'),
                 num_split)
-        code = "{:<15} = torch.split({}, {}, dim={})".format(
+        code = "_{:<15} = torch.split(_{}, {}, dim={})".format(
             IR_node.variable_name,
             self.parent_variable_name(IR_node),
             split_str,
@@ -711,7 +714,7 @@ class KitModel(nn.Module):
 
 
     def emit_Unstack(self, IR_node):
-        code = "{:<15} = torch.unbind({}, dim={})".format(
+        code = "_{:<15} = torch.unbind(_{}, dim={})".format(
             IR_node.variable_name,
             self.parent_variable_name(IR_node),
             IR_node.get_attr('axis')
@@ -720,7 +723,7 @@ class KitModel(nn.Module):
 
 
     def emit_Fill(self, IR_node):
-        code = "{:<15} = torch.full({}.int().numpy().tolist(), {})".format(
+        code = "_{:<15} = torch.full(_{}.int().numpy().tolist(), {})".format(
             IR_node.variable_name,
             self.parent_variable_name(IR_node),
             IR_node.get_attr('value')
@@ -733,7 +736,7 @@ class KitModel(nn.Module):
 
 
     def emit_Unsqueeze(self, IR_node):
-        code = "{:<15} = {}.unsqueeze({})".format(
+        code = "_{:<15} = _{}.unsqueeze({})".format(
             IR_node.variable_name,
             self.parent_variable_name(IR_node),
             IR_node.get_attr('axes')[0]
@@ -742,7 +745,7 @@ class KitModel(nn.Module):
 
 
     def emit_Transpose(self, IR_node):
-        code = "{:<15} = {}.permute({})".format(
+        code = "_{:<15} = _{}.permute(_{})".format(
             IR_node.variable_name,
             self.parent_variable_name(IR_node),
             self.parent_variable_name(IR_node, [1]))
@@ -750,7 +753,7 @@ class KitModel(nn.Module):
 
 
     def emit_Minimum(self, IR_node):
-        code = "{:<15} = torch.min({}, {})".format(
+        code = "_{:<15} = torch.min(_{}, _{})".format(
             IR_node.variable_name,
             self.parent_variable_name(IR_node),
             self.parent_variable_name(IR_node, [1]))
@@ -758,7 +761,7 @@ class KitModel(nn.Module):
 
 
     def emit_Maxmum(self, IR_node):
-        code = "{:<15} = torch.max({}, {})".format(
+        code = "_{:<15} = torch.max(_{}, _{})".format(
             IR_node.variable_name,
             self.parent_variable_name(IR_node),
             self.parent_variable_name(IR_node, [1]))
@@ -766,20 +769,25 @@ class KitModel(nn.Module):
 
 
     def emit_Square(self, IR_node):
-        code = "{:<15} = {}.pow(2)".format(
+        code = "_{:<15} = _{}.pow(2)".format(
             IR_node.variable_name,
             self.parent_variable_name(IR_node))
         return code
 
 
     def emit_PRelu(self, IR_node):
-        code = "{:<15} = F.prelu({}, torch.from_numpy(__weights_dict['{}']['weights']))".format(
+        self.used_layers.add(IR_node.type)
+        self.add_init(2, "self._{} = self.__prelu(name='{}')".format(
+             IR_node.variable_name,
+             IR_node.name
+        ))
+        code = "_{:<15} = self._{}(_{})".format(
+            IR_node.real_variable_name,
             IR_node.variable_name,
-            self.parent_variable_name(IR_node, [0]),
-            IR_node.name)
+            self.parent_variable_name(IR_node))
         
         if self.weight_loaded:
-            self.weights_dict[IR_node.name]['weights'] = self.weights_dict[IR_node.name]['gamma']
+            self.weights_dict[IR_node.name]['weights'.decode()] = self.weights_dict[IR_node.name]['gamma']
         
         return code
 
@@ -794,7 +802,7 @@ class KitModel(nn.Module):
         elif dstType == 'int':
             dst = 'torch.IntTensor'
         
-        code = "{:<15} = {}.type({})".format(
+        code = "_{:<15} = _{}.type({})".format(
             IR_node.real_variable_name,
             self.parent_variable_name(IR_node),
             dst)
@@ -803,8 +811,8 @@ class KitModel(nn.Module):
 
 
     def emit_Scope(self, IR_node):
-        input_vars = [self.parent_variable_name(IR_node, [idx]) for idx in range(len(IR_node.in_edges))]
-        code = "{:<15} = self.__{}({})".format(
+        input_vars = ['_' + self.parent_variable_name(IR_node, [idx]) for idx in range(len(IR_node.in_edges))]
+        code = "_{:<15} = self.__{}({})".format(
             IR_node.real_variable_name,
             IR_node.pattern,
             ', '.join(input_vars))
@@ -844,6 +852,44 @@ class KitModel(nn.Module):
             function_code = _scope_func(scope_node.pattern, param_code, body_code, scope_node.return_variables)
 
             self.layers_codes[scope_node.pattern] = function_code
+
+
+    def _layer_PRelu(self):
+        self.add_body(0,"""
+    @staticmethod
+    def __prelu(name):
+        class CompliantPReLU(nn.Module):
+            def __init__(self, num_parameters=1, init=0.25):
+                super(CompliantPReLU, self).__init__()
+                self.prelu = torch.nn.PReLU(num_parameters, init)
+
+            def forward(self, x):
+                # standard PReLU for training. Use ReLU only during eval
+                if self.training:
+                    return self.prelu(x)
+                else:
+                    # Warning. Logic not exported (detached). Layer needs to have same dimensions each pass
+                    m_shape = [-1 if idx == 1 else 1 for idx in range(len(x.data.detach().shape))]
+                    m = self.prelu.weight.view(*m_shape)
+                    return F.relu(x) - m*F.relu(-x)
+
+            @property
+            def weight(self):
+                return self.prelu.weight
+
+            @property
+            def num_paramters(self):
+                return self.prelu.num_parameters
+
+            @property
+            def state_dict(self):
+                return self.prelu.state_dict
+
+        weights = torch.from_numpy(__weights_dict[name]['weights'])
+        layer = CompliantPReLU(num_parameters=len(weights))
+        layer.state_dict()['weight'].copy_(weights)
+        return layer
+        """)
 
 
     def _layer_Embedding(self):
